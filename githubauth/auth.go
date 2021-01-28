@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/oauth2"
 )
@@ -29,22 +30,98 @@ var jsonHeaders = http.Header{
 }
 
 func MustAuthorize(logger io.Writer) *oauth2.Token {
-	hreq := mustCraftDeviceVerificationCodeRequest(logger)
+	deviceHTTPReq := mustCraftDeviceVerificationCodeRequest(logger)
 
-	hres, err := http.DefaultClient.Do(hreq)
+	deviceHTTPRes, err := http.DefaultClient.Do(deviceHTTPReq)
 	if err != nil {
-		fmt.Fprintf(logger, "failed to perform device verification code request: %q\n", err)
+		fmt.Fprintf(logger, "failed to perform device verification code http request: %q\n", err)
 		os.Exit(1)
 	}
-	res := &deviceVerificationCodeResponse{}
-	err = json.NewDecoder(hres.Body).Decode(res)
+	deviceRes := &deviceVerificationCodeResponse{}
+	err = json.NewDecoder(deviceHTTPRes.Body).Decode(deviceRes)
 	if err != nil {
 		fmt.Fprintf(logger, "failed to decode device verification code response: %q\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(logger, "received device verification code response: %#v\n", res)
-	os.Exit(0)
-	return nil
+
+	// Ask user to navigate to URL and enter code
+	fmt.Fprintf(logger, "Please navigate to %s, enter the code %v and check back here in a few seconds\n", deviceRes.VerificationURI, deviceRes.UserCode)
+	var token *oauth2.Token
+	var interval = deviceRes.Interval
+	for token == nil {
+		// Obey the rate limit:
+		time.Sleep(time.Duration(interval) * time.Second)
+		tokenHTTPReq := mustCraftTokenVerificationCodeRequest(logger, clientID, deviceRes.DeviceCode)
+		res, err := http.DefaultClient.Do(tokenHTTPReq)
+		if err != nil {
+			fmt.Fprintf(logger, "failed to perform token http request: %q\n", err)
+			os.Exit(1)
+		}
+		tokenRes := &tokenResponse{}
+		err = json.NewDecoder(res.Body).Decode(tokenRes)
+		if err != nil {
+			fmt.Fprintf(logger, "failed to decode token response: %q\n", err)
+			os.Exit(1)
+		}
+		if tokenRes.Error != "" {
+			if tokenRes.Error == "authorization_pending" {
+				continue
+			}
+			if tokenRes.Error == "slow_down" {
+				if tokenRes.Interval == 0 {
+					fmt.Fprint(logger, "API asked us to slow down but could not find the new rate.\n")
+					os.Exit(1)
+				}
+				fmt.Fprintf(logger, "API asked us to slow down, new rate is %v seconds.\n", tokenRes.Interval)
+				interval = tokenRes.Interval
+				continue
+			}
+			fmt.Fprintf(logger, "unhandled token error response: %q\n%q\n%q\n", tokenRes.Error, tokenRes.ErrorDescription, tokenRes.ErrorURI)
+			os.Exit(1)
+		}
+		token = &oauth2.Token{
+			AccessToken: tokenRes.AccessToken,
+			TokenType:   tokenRes.TokenType,
+		}
+	}
+
+	return token
+}
+
+type tokenRequest struct {
+	ClientID   string `json:"client_id"`
+	DeviceCode string `json:"device_code"`
+	GrantType  string `json:"grant_type"`
+}
+type tokenResponse struct {
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	Scope            string `json:"scope"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	ErrorURI         string `json:"error_uri"`
+	Interval         int    `json:"interval"`
+}
+
+func mustCraftTokenVerificationCodeRequest(logger io.Writer, clientID, deviceCode string) *http.Request {
+	req := &tokenRequest{
+		ClientID:   clientID,
+		DeviceCode: deviceCode,
+		GrantType:  "urn:ietf:params:oauth:grant-type:device_code",
+	}
+	bb, err := json.Marshal(req)
+	if err != nil {
+		fmt.Fprintf(logger, "could not marshal token request: %q\n", err)
+		os.Exit(1)
+	}
+	buf := bytes.NewBuffer(bb)
+	tokenHTTPReq, err := http.NewRequest(http.MethodPost, "https://github.com/login/oauth/access_token", buf)
+	if err != nil {
+		fmt.Fprintf(logger, "could not construct token http request: %q\n", err)
+		os.Exit(1)
+	}
+	tokenHTTPReq.Header = jsonHeaders
+	return tokenHTTPReq
 }
 
 var deviceVerificationCodeURL = "https://github.com/login/device/code"
@@ -88,7 +165,7 @@ func mustCraftDeviceVerificationCodeRequest(logger io.Writer) *http.Request {
 
 	initialRequest, err := http.NewRequest(http.MethodPost, deviceVerificationCodeURL, buf)
 	if err != nil {
-		fmt.Fprintf(logger, "could not craft device verification code request: %q\n", err)
+		fmt.Fprintf(logger, "could not construct device verification code http request: %q\n", err)
 		os.Exit(1)
 	}
 	initialRequest.Header = jsonHeaders
