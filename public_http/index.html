@@ -3,17 +3,39 @@
   <head>
     <script src="https://unpkg.com/vue@next"></script>
     <script async src="/app.js"></script>
+<style>
+li {
+  /* truncate lines */
+  width: 600px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>
   </head>
   <body id="repotime">
     <header>
       <span>Welcome to repotime{{username == "" ? "." : " "+username+"."}}</span>
-      <span v-if="reposAvailable"> Choose a repository:</span>
+      <span v-if="reposAvailable"> Choose a repository: </span>
       <select v-if="reposAvailable" v-model="selectedRepo" v-on:change="onRepoSelected">
         <option
           v-for="repo in repos"
           >{{repo.full_name}}</option>
       </select>
-
     </header>
+    <article>
+      <code>
+      <!-- <ul v&#45;if="commitsAvailable"> -->
+      <!--   <li v&#45;for="commit in commits">{{ commit.sha.substring(0, 8) +" &#45; " +commit.commit.message }}</li> -->
+      <!--   </ul> -->
+      <ul v-if="timelineDataAvailable">
+        <li v-for="item in timelineData">
+          <a v-bind:href="item.url">
+            {{ item.time + " - " + item.type + " - " + item.message }}
+          </a>
+        </li>
+        </ul>
+      </code>
+    </article>
   </body>
 </html>
