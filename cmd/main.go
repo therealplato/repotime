@@ -62,13 +62,24 @@ func (s *apiServer) getUsername(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) getRepos(w http.ResponseWriter, r *http.Request) {
-	rr, _, err := s.client.Repositories.List(r.Context(), "", nil)
-	if err != nil {
-		fmt.Printf("getRepos error: %q\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	var allRepos []*github.Repository
+	opt := &github.RepositoryListOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
 	}
-	bb, err := json.MarshalIndent(rr, "", "  ")
+	for {
+		rr, resp, err := s.client.Repositories.List(r.Context(), "", opt)
+		if err != nil {
+			fmt.Printf("getRepos error: %q\n", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		allRepos = append(allRepos, rr...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	bb, err := json.MarshalIndent(allRepos, "", "  ")
 	if err != nil {
 		fmt.Printf("getRepos marshal error: %q\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -97,13 +108,24 @@ func (s *apiServer) getCommits(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	cc, _, err := s.client.Repositories.ListCommits(r.Context(), s.ownerLogin, s.repoName, nil)
-	if err != nil {
-		fmt.Printf("failed to retrieve commits: %q\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	opt := &github.CommitsListOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
 	}
-	bb, err := json.MarshalIndent(cc, "", "  ")
+	var allCommits []*github.RepositoryCommit
+	for {
+		cc, resp, err := s.client.Repositories.ListCommits(r.Context(), s.ownerLogin, s.repoName, opt)
+		if err != nil {
+			fmt.Printf("failed to retrieve commits: %q\n", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		allCommits = append(allCommits, cc...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	bb, err := json.MarshalIndent(allCommits, "", "  ")
 	if err != nil {
 		fmt.Printf("getCommits marshal error: %q\n", err)
 		w.WriteHeader(http.StatusInternalServerError)
