@@ -6,7 +6,14 @@
   </head>
   <body id="repotime">
     <header>
-      Welcome to repotime {{username}}
+      <span>Welcome to repotime{{username == "" ? "." : " "+username+"."}}</span>
+      <span v-if="reposAvailable"> Choose a repository:</span>
+      <select v-if="reposAvailable" v-model="selectedRepo" v-on:change="onRepoSelected">
+        <option
+          v-for="repo in repos"
+          >{{repo.full_name}}</option>
+      </select>
+
     </header>
   </body>
 </html>
